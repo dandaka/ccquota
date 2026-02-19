@@ -186,9 +186,9 @@ else
   for i in $(seq 0 $((COUNT - 1))); do
     echo "${LABELS[$i]}"
     echo "${PERCENTS[$i]}% used"
-    echo "${RESETS[$i]}"
     pace=$(compute_pace "${PERCENTS[$i]}" "${RESETS[$i]}" "${KEYS[$i]}")
-    [[ -n "$pace" ]] && echo "Pace: ${pace}%"
+    [[ -n "$pace" ]] && echo "${pace}% pace"
+    echo "${RESETS[$i]}"
     echo ""
   done
 fi
