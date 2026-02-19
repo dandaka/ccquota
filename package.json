@@ -1,15 +1,15 @@
 {
-  "name": "cclimits",
+  "name": "ccquota",
   "version": "1.0.0",
   "description": "CLI tool to check Claude Code usage limits",
   "author": "Vlad Ra",
   "license": "MIT",
-  "keywords": ["claude", "claude-code", "usage", "limits", "cli"],
+  "keywords": ["claude", "claude-code", "usage", "limits", "quota", "cli"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/dandaka/cclimits.git"
+    "url": "https://github.com/dandaka/ccquota.git"
   },
   "bin": {
-    "cclimits": "./cclimits.sh"
+    "ccquota": "./cclimits.sh"
   }
 }

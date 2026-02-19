@@ -1,4 +1,4 @@
-# cclimits
+# ccquota
 
 Read your Claude Code subscription usage limits from the terminal.
 
@@ -64,20 +64,20 @@ sudo dnf install tmux
 ## Install
 
 ```bash
-npm install -g cclimits
+npm install -g ccquota
 ```
 
 Or run without installing:
 
 ```bash
-npx cclimits
+npx ccquota
 ```
 
 ## Usage
 
 ```bash
-cclimits           # plain text output
-cclimits --json    # JSON output
+ccquota           # plain text output
+ccquota --json    # JSON output
 ```
 
 ### JSON output
@@ -104,7 +104,7 @@ cclimits --json    # JSON output
 
 ```bash
 # Alert when weekly usage is above 90%
-pct=$(cclimits --json | python3 -c "import sys,json; print(json.load(sys.stdin)['currentweekallmodels']['percent'])")
+pct=$(ccquota --json | python3 -c "import sys,json; print(json.load(sys.stdin)['currentweekallmodels']['percent'])")
 [ "$pct" -gt 90 ] && echo "Warning: weekly usage at ${pct}%"
 ```
 
