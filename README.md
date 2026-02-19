@@ -10,10 +10,12 @@ Resets 4am (Europe/Lisbon)
 Current week (all models)
 88% used
 Resets Feb 20 at 1pm (Europe/Lisbon)
+Pace: 130%
 
 Current week (Sonnet only)
 63% used
 Resets 9pm (Europe/Lisbon)
+Pace: 95%
 
 Extra usage
 100% used
@@ -64,13 +66,9 @@ sudo dnf install tmux
 ## Install
 
 ```bash
-npm install -g ccquota
-```
-
-Or run without installing:
-
-```bash
-npx ccquota
+git clone https://github.com/dandaka/ccquota.git
+cd ccquota
+npm install -g .
 ```
 
 ## Usage
@@ -80,6 +78,16 @@ ccquota           # plain text output
 ccquota --json    # JSON output
 ```
 
+### Pace
+
+Pace tells you whether you're on track to stay within your quota by the reset time.
+
+- **100%** — using exactly the right amount for the time elapsed
+- **>100%** — burning faster than sustainable (e.g. 130% = 30% over pace)
+- **<100%** — well under the limit
+
+Pace is shown for weekly and monthly windows. It's omitted for the current session (no fixed window start) and for extra pay-as-you-go usage.
+
 ### JSON output
 
 ```json
@@ -87,10 +95,12 @@ ccquota --json    # JSON output
   "currentsession": { "percent": 1, "reset": "Resets 4am (Europe/Lisbon)" },
   "currentweekallmodels": {
     "percent": 88,
+    "pace": 130,
     "reset": "Resets Feb 20 at 1pm (Europe/Lisbon)"
   },
   "currentweeksonnetonly": {
     "percent": 63,
+    "pace": 95,
     "reset": "Resets 9pm (Europe/Lisbon)"
   },
   "extrausage": {
