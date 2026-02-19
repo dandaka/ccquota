@@ -44,6 +44,77 @@ wait_for() {
   done
 }
 
+# --- Pace calculation ---
+# Returns pace as integer percent (100=on track, 130=30% over, 70=30% under)
+# or empty string if calculation not possible.
+# Args: $1=percent_used $2=reset_string $3=label_key
+compute_pace() {
+  local pct="$1"
+  local reset="$2"
+  local key="$3"
+  local now_epoch reset_epoch window_seconds elapsed tz
+
+  # Extra usage (pay-as-you-go) and session (unknown window start) don't apply
+  case "$reset" in *"spent"*) return ;; esac
+  case "$key" in "currentsession") return ;; esac
+
+  # Extract timezone from "(Region/City)"
+  tz=$(echo "$reset" | grep -oE '\([A-Za-z_]+/[A-Za-z_]+\)' | tr -d '()')
+  [[ -z "$tz" ]] && return
+
+  now_epoch=$(date +%s)
+  reset_epoch=""
+  window_seconds=""
+
+  # Weekly with date: "Resets Feb 20 at 1pm" or "Resets Feb 20 at 1:30pm"
+  if echo "$reset" | grep -qE 'Resets [A-Za-z]+ [0-9]+ at [0-9]+(:[0-9]+)?(am|pm)'; then
+    local date_part
+    date_part=$(echo "$reset" | grep -oE '[A-Za-z]+ [0-9]+ at [0-9]+(:[0-9]+)?(am|pm)')
+    # Normalize "1:30pm" -> strip minutes for date -f (date handles hour only)
+    local date_no_min
+    date_no_min=$(echo "$date_part" | sed 's/:[0-9][0-9]\(am\|pm\)/\1/')
+    reset_epoch=$(TZ="$tz" date -j -f "%b %d at %I%p" "$date_no_min" "+%s" 2>/dev/null) || return
+    window_seconds=$((7 * 24 * 3600))
+
+  # Weekly reset today (date omitted): "Resets 9pm" or "Resets 4am"
+  elif echo "$reset" | grep -qE 'Resets [0-9]+(:[0-9]+)?(am|pm)'; then
+    local time_part
+    time_part=$(echo "$reset" | grep -oE '[0-9]+(:[0-9]+)?(am|pm)')
+    local time_no_min
+    time_no_min=$(echo "$time_part" | sed 's/:[0-9][0-9]\(am\|pm\)/\1/')
+    # Parse as today's date + given time in the target timezone
+    local today_in_tz
+    today_in_tz=$(TZ="$tz" date "+%b %d")
+    reset_epoch=$(TZ="$tz" date -j -f "%b %d %I%p" "$today_in_tz $time_no_min" "+%s" 2>/dev/null) || return
+    # If already past, it's tomorrow
+    [[ "$reset_epoch" -le "$now_epoch" ]] && reset_epoch=$((reset_epoch + 86400))
+    window_seconds=$((7 * 24 * 3600))
+
+  # Monthly: "Resets Mar 1" (date only, no time — resets at midnight)
+  elif echo "$reset" | grep -qE 'Resets [A-Za-z]+ [0-9]+'; then
+    local month_day
+    month_day=$(echo "$reset" | grep -oE 'Resets [A-Za-z]+ [0-9]+' | sed 's/Resets //')
+    reset_epoch=$(TZ="$tz" date -j -f "%b %d" "$month_day" "+%s" 2>/dev/null) || return
+    [[ "$reset_epoch" -le "$now_epoch" ]] && reset_epoch=$(TZ="$tz" date -j -v+1y -f "%b %d" "$month_day" "+%s" 2>/dev/null) || return
+    # Window = days in current month (last day of month = 1 day before reset)
+    local days_in_month
+    days_in_month=$(TZ="$tz" date -j -v-1d -f "%b %d" "$month_day" "+%d" 2>/dev/null) || days_in_month=30
+    window_seconds=$((days_in_month * 24 * 3600))
+  else
+    return
+  fi
+
+  [[ -z "$reset_epoch" || -z "$window_seconds" ]] && return
+
+  local time_remaining=$(( reset_epoch - now_epoch ))
+  [[ "$time_remaining" -le 0 ]] && return
+
+  local elapsed=$(( window_seconds - time_remaining ))
+  [[ "$elapsed" -le 0 ]] && return
+
+  echo $(( pct * window_seconds / elapsed ))
+}
+
 # --- Launch Claude ---
 
 $TMUX new-session -d -s "$SESSION" -x 220 -y 50 "$CLAUDE" 2>/dev/null || {
@@ -79,25 +150,45 @@ if [[ -z "$LINES" ]]; then
   exit 1
 fi
 
+# Parse lines into parallel arrays: labels, percents, resets, keys
+declare -a LABELS PERCENTS RESETS KEYS
+i=0
+while IFS= read -r label && IFS= read -r pct_line && IFS= read -r reset_line; do
+  LABELS[$i]="$label"
+  PERCENTS[$i]=$(echo "$pct_line" | grep -oE '[0-9]+' || echo "0")
+  RESETS[$i]="$reset_line"
+  key=$(echo "$label" | tr ' ' '_' | tr -cd 'a-zA-Z0-9_' | tr 'A-Z' 'a-z')
+  KEYS[$i]="$key"
+  i=$((i + 1))
+done <<< "$LINES"
+
+COUNT=$i
+
 if $JSON; then
-  echo "$LINES" | awk '
-    BEGIN { printf "{"; first=1 }
-    NR%3==1 {
-      label=$0
-      gsub(/ /, "_", label)
-      gsub(/[^a-zA-Z0-9_]/, "", label)
-      key=tolower(label)
-    }
-    NR%3==2 { pct=$0; gsub(/% used/, "", pct); gsub(/ /, "", pct) }
-    NR%3==0 {
-      reset=$0
-      gsub(/"/, "\\\"", reset)
-      if (!first) printf ","
-      printf "\"%s\":{\"percent\":%s,\"reset\":\"%s\"}", key, pct, reset
-      first=0
-    }
-    END { printf "}\n" }
-  '
+  printf "{"
+  first=true
+  for i in $(seq 0 $((COUNT - 1))); do
+    key="${KEYS[$i]}"
+    pct="${PERCENTS[$i]}"
+    reset="${RESETS[$i]}"
+    reset_escaped="${reset//\"/\\\"}"
+    pace=$(compute_pace "$pct" "$reset" "$key")
+    $first || printf ","
+    if [[ -n "$pace" ]]; then
+      printf '"%s":{"percent":%s,"pace":%s,"reset":"%s"}' "$key" "$pct" "$pace" "$reset_escaped"
+    else
+      printf '"%s":{"percent":%s,"reset":"%s"}' "$key" "$pct" "$reset_escaped"
+    fi
+    first=false
+  done
+  printf "}\n"
 else
-  echo "$LINES" | awk 'NR%3==0{print; print ""} NR%3!=0{print}'
+  for i in $(seq 0 $((COUNT - 1))); do
+    echo "${LABELS[$i]}"
+    echo "${PERCENTS[$i]}% used"
+    echo "${RESETS[$i]}"
+    pace=$(compute_pace "${PERCENTS[$i]}" "${RESETS[$i]}" "${KEYS[$i]}")
+    [[ -n "$pace" ]] && echo "Pace: ${pace}%"
+    echo ""
+  done
 fi
