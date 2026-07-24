@@ -56,7 +56,7 @@ compute_pace() {
 
   # Extra usage (pay-as-you-go) and session (unknown window start) don't apply
   case "$reset" in *"spent"*) return ;; esac
-  case "$key" in "currentsession") return ;; esac
+  case "$key" in "current_session") return ;; esac
 
   # Extract timezone from "(Region/City)"
   tz=$(echo "$reset" | grep -oE '\([A-Za-z_]+/[A-Za-z_]+\)' | tr -d '()')
@@ -124,12 +124,19 @@ $TMUX new-session -d -s "$SESSION" -x 220 -y 50 "$CLAUDE" 2>/dev/null || {
 
 wait_for "Claude Code"
 
+send_keys() {
+  $TMUX send-keys -t "$SESSION" "$@" 2>/dev/null || {
+    echo "Error: Claude Code exited unexpectedly inside tmux. Run 'claude' directly to check for a login, trust, or update prompt." >&2
+    exit 1
+  }
+}
+
 # Send /usage — Escape dismisses autocomplete, Enter executes
-$TMUX send-keys -t "$SESSION" "/usage" ""
+send_keys "/usage" ""
 sleep 0.5
-$TMUX send-keys -t "$SESSION" Escape
+send_keys Escape
 sleep 0.3
-$TMUX send-keys -t "$SESSION" Enter
+send_keys Enter
 
 wait_for "Current session"
 
@@ -139,7 +146,9 @@ $TMUX capture-pane -t "$SESSION" -p > "$CAPTURE"
 
 LINES=$(sed 's/\r//g' "$CAPTURE" \
   | grep -A 30 "Current session" \
+  | sed "/What's contributing/,\$d" \
   | grep -v "Esc to cancel" \
+  | grep -v "weekly limits promo" \
   | sed 's/[█▌▙▛▜▝▘─]//g' \
   | sed 's/^[[:space:]]*//' \
   | sed 's/[[:space:]]\{2,\}\([0-9]\)/\1/g' \
@@ -172,7 +181,7 @@ if $JSON; then
     pct="${PERCENTS[$i]}"
     reset="${RESETS[$i]}"
     reset_escaped="${reset//\"/\\\"}"
-    pace=$(compute_pace "$pct" "$reset" "$key")
+    pace=$(compute_pace "$pct" "$reset" "$key" || true)
     $first || printf ","
     if [[ -n "$pace" ]]; then
       printf '"%s":{"percent":%s,"pace":%s,"reset":"%s"}' "$key" "$pct" "$pace" "$reset_escaped"
@@ -186,8 +195,10 @@ else
   for i in $(seq 0 $((COUNT - 1))); do
     echo "${LABELS[$i]}"
     echo "${PERCENTS[$i]}% used"
-    pace=$(compute_pace "${PERCENTS[$i]}" "${RESETS[$i]}" "${KEYS[$i]}")
-    [[ -n "$pace" ]] && echo "${pace}% pace"
+    pace=$(compute_pace "${PERCENTS[$i]}" "${RESETS[$i]}" "${KEYS[$i]}" || true)
+    if [[ -n "$pace" ]]; then
+      echo "${pace}% pace"
+    fi
     echo "${RESETS[$i]}"
     echo ""
   done
